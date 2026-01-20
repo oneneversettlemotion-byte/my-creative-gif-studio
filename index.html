@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>创意 GIF 工坊 - 视频与序列帧转换</title>
+    <script src="https://ghcdn.rawgit.org/gzuidhof/coi-serviceworker/master/coi-serviceworker.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            background-color: white;
+            border-radius: 20px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .control-panel {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        .preview-panel {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #fcfcfc;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2em;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        p.subtitle {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-group label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 5px;
+        }
+
+        input[type="number"],
+        input[type="range"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #dcdcdc;
+            border-radius: 8px;
+            font-size: 1em;
+            box-sizing: border-box;
+        }
+        
+        .file-upload-box {
+            border: 2px dashed #aed6f1;
+            padding: 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .file-upload-box:hover {
+            background-color: #eaf6ff;
+        }
+
+        input[type="file"] {
+            display: none; /* 隐藏原始文件输入框 */
+        }
+
+        .custom-file-button {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 10px;
+        }
+        .custom-file-button:hover {
+            background-color: #2980b9;
+        }
+
+
+        button#convertBtn {
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        button#convertBtn:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+            transform: scale(1);
+        }
+        button#convertBtn:not(:disabled):hover {
+            background-color: #229954;
+            transform: scale(1.02);
+        }
+
+        #statusMessage {
+            text-align: center;
+            font-size: 0.9em;
+            color: #555;
+            min-height: 20px; /* 确保高度稳定 */
+        }
+
+        #outputGif {
+            max-width: 100%;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            display: none; /* 默认隐藏 */
+        }
+        #outputGif.active {
+            display: block;
+        }
+
+        .placeholder {
+            color: #bbb;
+            font-size: 1.2em;
+            text-align: center;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            .control-panel, .preview-panel {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="control-panel">
+            <h1>创意 GIF 工坊</h1>
+            <p class="subtitle">将视频或图片序列转换为精美 GIF</p>
+
+            <div class="input-group">
+                <label for="modeSelect">选择输入类型:</label>
+                <select id="modeSelect" style="padding: 10px; border: 1px solid #dcdcdc; border-radius: 8px;">
+                    <option value="video">单个视频文件</option>
+                    <option value="sequence">图片序列 (多张图片)</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label for="fileInput">选择文件:</label>
+                <div class="file-upload-box" id="fileUploadBox">
+                    <input type="file" id="fileInput" accept="video/*">
+                    <span id="fileNameDisplay">点击选择文件...</span>
+                    <div class="custom-file-button">浏览文件</div>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="widthInput">GIF 宽度 (px):</label>
+                <input type="number" id="widthInput" value="480" min="100" max="1920">
+            </div>
+
+            <div class="input-group">
+                <label for="fpsInput">帧率 (FPS):</label>
+                <input type="number" id="fpsInput" value="12" min="5" max="30">
+            </div>
+
+            <button id="convertBtn">开始转换</button>
+            <div id="statusMessage">请选择视频或图片序列，然后点击转换。</div>
+        </div>
+
+        <div class="preview-panel">
+            <h3 style="color: #2c3e50;">转换结果预览</h3>
+            <p class="placeholder" id="placeholderText">你的 GIF 将在这里显示</p>
+            <img id="outputGif" alt="生成的GIF">
+        </div>
+    </div>
+
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg({ 
+            log: false, // 设为 true 可以在控制台看到FFmpeg日志
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+        });
+
+        const fileInput = document.getElementById('fileInput');
+        const modeSelect = document.getElementById('modeSelect');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const widthInput = document.getElementById('widthInput');
+        const fpsInput = document.getElementById('fpsInput');
+        const convertBtn = document.getElementById('convertBtn');
+        const statusMessage = document.getElementById('statusMessage');
+        const outputGif = document.getElementById('outputGif');
+        const placeholderText = document.getElementById('placeholderText');
+        const fileUploadBox = document.getElementById('fileUploadBox');
+
+        let currentFiles = []; // 用于存储选中的文件对象
+
+        // 根据模式切换文件选择类型
+        modeSelect.addEventListener('change', () => {
+            const mode = modeSelect.value;
+            if (mode === 'video') {
+                fileInput.setAttribute('accept', 'video/*');
+                fileInput.removeAttribute('multiple');
+            } else { // sequence
+                fileInput.setAttribute('accept', 'image/png, image/jpeg, image/webp');
+                fileInput.setAttribute('multiple', 'true');
+            }
+            fileNameDisplay.textContent = '点击选择文件...';
+            currentFiles = []; // 清空已选文件
+        });
+
+        // 监听文件选择
+        fileInput.addEventListener('change', () => {
+            currentFiles = Array.from(fileInput.files);
+            if (currentFiles.length > 0) {
+                if (modeSelect.value === 'video') {
+                    fileNameDisplay.textContent = `已选择: ${currentFiles[0].name}`;
+                } else {
+                    fileNameDisplay.textContent = `已选择: ${currentFiles.length} 张图片`;
+                }
+            } else {
+                fileNameDisplay.textContent = '点击选择文件...';
+            }
+            outputGif.classList.remove('active');
+            placeholderText.style.display = 'block';
+        });
+
+        // 绑定自定义文件选择区域的点击事件
+        fileUploadBox.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+
+        convertBtn.addEventListener('click', async () => {
+            if (currentFiles.length === 0) {
+                alert('请先选择视频文件或图片序列！');
+                return;
+            }
+
+            convertBtn.disabled = true;
+            statusMessage.innerText = "FFmpeg 引擎初始化中 (初次加载约需10秒)...";
+            outputGif.classList.remove('active');
+            placeholderText.style.display = 'block';
+
+            try {
+                if (!ffmpeg.isLoaded()) {
+                    await ffmpeg.load();
+                }
+
+                const outputFileName = 'output.gif';
+                const inputWidth = parseInt(widthInput.value);
+                const inputFps = parseInt(fpsInput.value);
+
+                statusMessage.innerText = "正在将文件写入内存，请稍候...";
+
+                if (modeSelect.value === 'video') {
+                    const file = currentFiles[0];
+                    ffmpeg.FS('writeFile', file.name, await fetchFile(file));
+                    statusMessage.innerText = `正在转换视频...`;
+                    await ffmpeg.run(
+                        '-i', file.name, 
+                        '-vf', `fps=${inputFps},scale=${inputWidth}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
+                        outputFileName
+                    );
+                } else { // sequence
+                    for (let i = 0; i < currentFiles.length; i++) {
+                        const file = currentFiles[i];
+                        ffmpeg.FS('writeFile', file.name, await fetchFile(file));
+                    }
+                    const imageList = currentFiles.map(f => f.name).join('|');
+                    statusMessage.innerText = `正在合成 ${currentFiles.length} 张图片...`;
+                    await ffmpeg.run(
+                        '-i', `concat:${imageList}`, 
+                        '-vf', `fps=${inputFps},scale=${inputWidth}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
+                        outputFileName
+                    );
+                }
+
+                const data = ffmpeg.FS('readFile', outputFileName);
+                const url = URL.createObjectURL(new Blob([data.buffer], { type: 'image/gif' }));
+                
+                outputGif.src = url;
+                outputGif.classList.add('active'); // 显示GIF
+                placeholderText.style.display = 'none'; // 隐藏占位符
+                statusMessage.innerText = "转换成功！右键图片或长按保存。";
+                
+            } catch (error) {
+                console.error("转换失败:", error);
+                statusMessage.innerText = `转换失败: ${error.message || error}`;
+                alert(`转换失败，请检查文件格式或重试: ${error.message || error}`);
+            } finally {
+                convertBtn.disabled = false;
+                // 清理FS中的文件，避免内存占用过大
+                try {
+                    ffmpeg.FS('unlink', 'input'); // 如果是视频模式
+                    for (const file of currentFiles) { // 如果是图片模式
+                        ffmpeg.FS('unlink', file.name);
+                    }
+                } catch (e) { /* ignore cleanup errors */ }
+            }
+        });
+    </script>
+</body>
+</html>
